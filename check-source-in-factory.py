@@ -177,8 +177,11 @@ class Checker(object):
                     if req.state.name == 'new':
                         self.logger.debug("request ok")
                         return True
-                    else:
+                    elif req.state.name == 'review':
                         self.logger.debug("request still in review")
+                        return None
+                    else:
+                        self.logger.error("request in state %s not expected"%req.state.name)
                         return None
         return False
 
