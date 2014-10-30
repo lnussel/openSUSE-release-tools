@@ -61,12 +61,12 @@ class Checker(object):
             good = self._check_one_request(req)
 
             if good is None:
-                self.logger.debug("ignoring")
+                self.logger.info("ignoring")
             elif good:
-                self.logger.debug("%s is good"%req.reqid)
+                self.logger.info("%s is good"%req.reqid)
                 self._set_review(req, 'accepted')
             else:
-                self.logger.debug("%s is not acceptable"%req.reqid)
+                self.logger.info("%s is not acceptable"%req.reqid)
                 self._set_review(req, 'declined')
 
     def _set_review(self, req, state):
@@ -88,6 +88,17 @@ class Checker(object):
         for a in req.actions:
             if a.type == 'maintenance_incident':
                 ret = self._check_package(a.src_project, a.src_package, a.src_rev, a.tgt_releaseproject, a.src_package)
+            elif a.type == 'maintenance_release':
+                pkgname = a.src_package
+                if pkgname == 'patchinfo':
+                    continue
+                linkpkg = self._get_linktarget_self(a.src_project, pkgname)
+                if linkpkg is not None:
+                    pkgname = linkpkg
+                # XXX: dirty hack because of obs maintenance model stupidity
+                pkgname = re.sub(".openSUSE_13.2_Update$", '', pkgname)
+                src_rev = self._get_verifymd5(a.src_project, a.src_package)
+                ret = self._check_package(a.src_project, a.src_package, src_rev, a.tgt_project, pkgname)
             elif a.type == 'submit':
                 rev = self._get_verifymd5(a.src_project, a.src_package, a.src_rev)
                 ret = self._check_package(a.src_project, a.src_package, rev, a.tgt_package, a.tgt_package)
@@ -103,9 +114,12 @@ class Checker(object):
         good = self._check_factory(src_rev, target_package)
 
         if good:
+            self.logger.info("%s is in Factory"%target_package)
             return good
 
         good = self._check_requests(src_rev, target_package)
+        if good:
+            self.logger.info("%s already reviewed for Factory"%target_package)
 
         return good
 
@@ -121,7 +135,7 @@ class Checker(object):
             self.logger.debug("srcmd5 matches")
             return True
 
-        self.logger.debug("srcmd5 not the latest version, checking history")
+        self.logger.debug("%s not the latest version, checking history", rev)
         u = osc.core.makeurl(self.apiurl, [ 'source', self.factory, package, '_history' ], { 'limit': '5' })
         try:
             r = osc.core.http_GET(u)
@@ -132,7 +146,10 @@ class Checker(object):
         root = ET.parse(r).getroot()
         for revision in root.findall('revision'):
             node = revision.find('srcmd5')
-            if node and node.text == rev:
+            if node is None:
+                continue
+            self.logger.debug("checking %s"%node.text)
+            if node.text == rev:
                 self.logger.debug("got it, rev %s"%revision.get('rev'))
                 return True
 
@@ -169,6 +186,23 @@ class Checker(object):
         if root is not None:
             srcmd5 = root.get('verifymd5')
             return srcmd5
+
+    # TODO: what if there is more than _link?
+    def _get_linktarget_self(self, src_project, src_package):
+        """ if it's a link to a package in the same project return the name of the package"""
+        query = {}
+        url = osc.core.makeurl(self.apiurl, ('source', src_project, src_package), query=query)
+        try:
+            root = ET.parse(osc.core.http_GET(url)).getroot()
+        except urllib2.HTTPError:
+            return None
+
+        if root is not None:
+            linkinfo = root.find("linkinfo")
+            if linkinfo is not None:
+                prj = root.get('project')
+                if prj is None or prj == src_project:
+                    return linkinfo.get('package')
 
     # XXX used in other modules
     def get_review_state(self, request_id, user):
