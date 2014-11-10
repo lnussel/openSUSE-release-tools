@@ -77,7 +77,9 @@ class Checker(object):
         if review_state == 'new':
             self.logger.debug("setting %s to %s"%(req.reqid, state))
             if not self.dryrun:
-                change_review_state(self,apiurl, req.reqid, state, by_user=self.review_user, message='Factory submission ok')
+                osc.core.change_review_state(apiurl = self.apiurl,
+                        reqid = req.reqid, newstate = state,
+                        by_user=self.review_user, message='Factory submission ok')
         elif review_state == '':
             self.logger.info("can't change state, %s does not have '%s' as reviewer"%(req.reqid, self.review_user))
         else:
@@ -246,10 +248,17 @@ class CommandLineInterface(cmdln.Cmdln):
         if (self.options.osc_debug):
             osc.conf.config['debug'] = 1
 
-        self.checker = Checker(apiurl = osc.conf.config['apiurl'], \
+        apiurl = osc.conf.config['apiurl']
+        if apiurl is None:
+            raise osc.oscerr.ConfigError("missing apiurl")
+        user = self.options.user
+        if user is None:
+            user = osc.conf.get_apiurl_usr(apiurl)
+
+        self.checker = Checker(apiurl = apiurl, \
                 factory = self.options.factory, \
                 dryrun = self.options.dry, \
-                user = self.options.user, \
+                user = user, \
                 logger = self.logger)
 
     def do_id(self, subcmd, opts, *args):
