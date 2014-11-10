@@ -87,7 +87,8 @@ class Checker(object):
         overall = None
         for a in req.actions:
             if a.type == 'maintenance_incident':
-                ret = self._check_package(a.src_project, a.src_package, a.src_rev, a.tgt_releaseproject, a.src_package)
+                rev = self._get_verifymd5(a.src_project, a.src_package, a.src_rev)
+                ret = self._check_package(a.src_project, a.src_package, rev, a.tgt_releaseproject, a.src_package)
             elif a.type == 'maintenance_release':
                 pkgname = a.src_package
                 if pkgname == 'patchinfo':
