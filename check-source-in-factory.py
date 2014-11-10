@@ -270,6 +270,27 @@ class CommandLineInterface(cmdln.Cmdln):
         self.checker.set_request_ids(args)
         self.checker.check_requests()
 
+    def do_review(self, subcmd, opts, *args):
+        """${cmd_name}: print the status of working copy files and directories
+
+        ${cmd_usage}
+        ${cmd_option_list}
+        """
+        if self.checker.review_user is None:
+            raise osc.oscerr.WrongArgs("missing user")
+
+        review = "@by_user='%s'+and+@state='new'"%self.checker.review_user
+        url = osc.core.makeurl(self.checker.apiurl, ('search', 'request'), "match=state/@name='review'+and+review[%s]"%review)
+        root = ET.parse(osc.core.http_GET(url)).getroot()
+
+        for request in root.findall('request'):
+            req = osc.core.Request()
+            req.read(request)
+            self.checker.requests.append(req)
+
+        self.checker.check_requests()
+
+
 if __name__ == "__main__":
     app = CommandLineInterface()
     sys.exit( app.main() )
