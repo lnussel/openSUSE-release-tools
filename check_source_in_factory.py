@@ -43,6 +43,7 @@ class Checker(object):
         self.logger = logger
         self.review_user = user
         self.requests = []
+        self.review_messages = { 'accepted' : 'ok', 'declined': 'the package needs to be accepted in Factory first' }
 
     def set_request_ids(self, ids):
         for rqid in ids:
@@ -74,9 +75,10 @@ class Checker(object):
         if review_state == 'new':
             self.logger.debug("setting %s to %s"%(req.reqid, state))
             if not self.dryrun:
+                msg = self.review_messages[state] if state in self.review_messages else state
                 osc.core.change_review_state(apiurl = self.apiurl,
                         reqid = req.reqid, newstate = state,
-                        by_user=self.review_user, message='Factory submission ok')
+                        by_user=self.review_user, message=msg)
         elif review_state == '':
             self.logger.info("can't change state, %s does not have '%s' as reviewer"%(req.reqid, self.review_user))
         else:
