@@ -98,8 +98,15 @@ class Checker(object):
                 linkpkg = self._get_linktarget_self(a.src_project, pkgname)
                 if linkpkg is not None:
                     pkgname = linkpkg
-                # XXX: dirty hack because of obs maintenance model stupidity
-                pkgname = re.sub(".openSUSE_13.2_Update$", '', pkgname)
+                # packages in maintenance have links to the target. Use that
+                # to find the real package name
+                (linkprj, linkpkg) = self._get_linktarget(a.src_project, pkgname)
+                if linkpkg is None or linkprj is None or linkprj != a.tgt_project:
+                    self.logger.error("%s/%s is not a link to %s"%(a.src_project, pkgname, a.tgt_project))
+                    overall = False
+                    break
+                else:
+                    pkgname = linkpkg
                 src_rev = self._get_verifymd5(a.src_project, a.src_package)
                 ret = self._check_package(a.src_project, a.src_package, src_rev, a.tgt_project, pkgname)
             elif a.type == 'submit':
@@ -193,19 +200,23 @@ class Checker(object):
     # TODO: what if there is more than _link?
     def _get_linktarget_self(self, src_project, src_package):
         """ if it's a link to a package in the same project return the name of the package"""
+        prj, pkg = self._get_linktarget(src_project, src_package)
+        if prj is None or prj == src_project:
+            return pkg
+
+    def _get_linktarget(self, src_project, src_package):
+
         query = {}
         url = osc.core.makeurl(self.apiurl, ('source', src_project, src_package), query=query)
         try:
             root = ET.parse(osc.core.http_GET(url)).getroot()
         except urllib2.HTTPError:
-            return None
+            return (None, None)
 
         if root is not None:
             linkinfo = root.find("linkinfo")
             if linkinfo is not None:
-                prj = root.get('project')
-                if prj is None or prj == src_project:
-                    return linkinfo.get('package')
+                return (linkinfo.get('project'), linkinfo.get('package'))
 
     # XXX used in other modules
     def get_review_state(self, request_id, user):
