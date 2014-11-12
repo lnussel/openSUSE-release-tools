@@ -1,1 +1,0 @@
-../check-source-in-factory.py
