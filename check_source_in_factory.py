@@ -55,7 +55,7 @@ class Checker(object):
 
     def check_requests(self):
         for req in self.requests:
-            good = self._check_one_request(req)
+            good = self.check_one_request(req)
 
             if good is None:
                 self.logger.info("ignoring")
@@ -82,7 +82,7 @@ class Checker(object):
         else:
             self.logger.debug("%s review in state '%s' not changed"%(req.reqid, review_state))
 
-    def _check_one_request(self, req):
+    def check_one_request(self, req):
         overall = None
         for a in req.actions:
             if a.type == 'maintenance_incident':
