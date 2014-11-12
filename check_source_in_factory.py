@@ -35,17 +35,14 @@ import osc.core
 import urllib2
 
 class Checker(object):
-    requests = []
 
     def __init__(self, apiurl = None, factory = None, dryrun = False, logger = None, user = None):
         self.apiurl = apiurl
-        self.factory = factory
+        self.factory = factory if factory else "openSUSE:Factory"
         self.dryrun = dryrun
         self.logger = logger
         self.review_user = user
-
-        if self.factory is None:
-            self.factory = "openSUSE:Factory"
+        self.requests = []
 
     def set_request_ids(self, ids):
         for rqid in ids:
