@@ -47,7 +47,7 @@ class Checker(object):
 
     def set_request_ids(self, ids):
         for rqid in ids:
-            u = osc.core.makeurl(self.apiurl, [ 'request', rqid ])
+            u = osc.core.makeurl(self.apiurl, [ 'request', rqid ], { 'withhistory' : '1' })
             r = osc.core.http_GET(u)
             root = ET.parse(r).getroot()
             req = osc.core.Request()
@@ -83,6 +83,39 @@ class Checker(object):
             self.logger.info("can't change state, %s does not have '%s' as reviewer"%(req.reqid, self.review_user))
         else:
             self.logger.debug("%s review in state '%s' not changed"%(req.reqid, review_state))
+
+    def add_review(self, req, by_group=None, by_user=None, by_project = None, by_package = None, msg=None):
+        query = {
+            'cmd': 'addreview'
+        }
+        if by_group:
+            query['by_group'] = by_group
+        elif by_user:
+            query['by_user'] = by_user
+        elif by_project:
+            query['by_project'] = by_project
+            if by_package:
+                query['by_package'] = by_package
+        else:
+            raise osc.oscerr.WrongArgs("missing by_*")
+
+        u = osc.core.makeurl(self.apiurl, ['request', req.reqid], query)
+        if self.dryrun:
+            self.logger.info('POST %s' % u)
+            return True
+
+        try:
+            r = osc.core.http_POST(u, data=msg)
+        except urllib2.HTTPError, e:
+            self.logger.error(e)
+            return False
+
+        code = ET.parse(r).getroot().attrib['code']
+        if code != 'ok':
+            self.logger.error("invalid return code %s"%code)
+            return False
+
+        return True
 
     def check_one_request(self, req):
         overall = None
@@ -232,6 +265,18 @@ class Checker(object):
             print('ERROR in URL %s [%s]' % (url, e))
         return states[0] if states else ''
 
+    def set_request_ids_search_review(self, user = None):
+        if user is None:
+            user = self.review_user
+        review = "@by_user='%s'+and+@state='new'"%user
+        url = osc.core.makeurl(self.apiurl, ('search', 'request'), "match=state/@name='review'+and+review[%s]&withhistory=1"%review)
+        root = ET.parse(osc.core.http_GET(url)).getroot()
+
+        for request in root.findall('request'):
+            req = osc.core.Request()
+            req.read(request)
+            self.requests.append(req)
+
 class CommandLineInterface(cmdln.Cmdln):
     def __init__(self, *args, **kwargs):
         cmdln.Cmdln.__init__(self, args, kwargs)
@@ -292,15 +337,7 @@ class CommandLineInterface(cmdln.Cmdln):
         if self.checker.review_user is None:
             raise osc.oscerr.WrongArgs("missing user")
 
-        review = "@by_user='%s'+and+@state='new'"%self.checker.review_user
-        url = osc.core.makeurl(self.checker.apiurl, ('search', 'request'), "match=state/@name='review'+and+review[%s]"%review)
-        root = ET.parse(osc.core.http_GET(url)).getroot()
-
-        for request in root.findall('request'):
-            req = osc.core.Request()
-            req.read(request)
-            self.checker.requests.append(req)
-
+        self.checker.set_request_ids_search_review()
         self.checker.check_requests()
 
 

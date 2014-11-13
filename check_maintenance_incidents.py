@@ -44,13 +44,62 @@ class MaintenanceChecker(Checker):
         Checker.__init__(self, *args, **kwargs)
         self.review_messages = {}
 
+    # XXX: share with checkrepo
+    def _maintainers(self, package):
+        """Get the maintainer of the package involved in the package."""
+        query = {
+            'binary': package,
+        }
+        url = osc.core.makeurl(self.apiurl, ('search', 'owner'), query=query)
+        root = ET.parse(osc.core.http_GET(url)).getroot()
+        return [p.get('name') for p in root.findall('.//person') if p.get('role') == 'maintainer']
+
+    def add_devel_project_review(self, req, package):
+        """ add devel project/package as reviewer """
+        query = {
+            'binary': package,
+        }
+        url = osc.core.makeurl(self.apiurl, ('search', 'owner'), query=query)
+        root = ET.parse(osc.core.http_GET(url)).getroot()
+        for p in root.findall('./owner'):
+            prj = p.get("project")
+            pkg = p.get("package")
+            self.add_review(req, by_project = prj, by_package = pkg,
+                    msg = "Submission by someone who is not maintainer in the devel project. Please review")
+
     def check_one_request(self, req):
         overall = None
-        add_reviewer = False
+        add_factory_source = False
+        needs_maintainer_review = set()
         for a in req.actions:
             if a.type == 'maintenance_incident':
+                foundone = False
+                author = req.get_creator()
+                # check if there is a link and use that or the real package
+                # name as src_packge may end with something like
+                # .openSUSE_XX.Y_Update
+                (linkprj, linkpkg) = self._get_linktarget(a.src_project, a.src_package)
+                if linkpkg is not None:
+                    pkgname = linkpkg
+                maintainers = set(self._maintainers(pkgname))
+                if maintainers:
+                    for m in maintainers:
+                        if author == m:
+                            self.logger.debug("%s is maintainer"%author)
+                            foundone = True
+                    if not foundone:
+                        for r in req.reviews:
+                            if r.by_user in maintainers:
+                                self.logger.debug("found %s as reviewer"%r.by_user)
+                                foundone = True
+                    self.logger.info("author: %s, maintainers: %s => need review"%(author, ','.join(maintainers)))
+                    if not foundone:
+                        needs_maintainer_review.add(pkgname)
+                else:
+                    self.logger.warning("%s doesn't have maintainers"%pkgname)
+
                 if a.tgt_releaseproject == "openSUSE:CPE:SLE-12":
-                    add_reviewer = True
+                    add_factory_source = True
 
                 ret = True
             else:
@@ -59,19 +108,14 @@ class MaintenanceChecker(Checker):
             if ret == False or overall is None and ret is not None:
                 overall = ret
 
-        if add_reviewer:
+        if add_factory_source:
             self.logger.debug("%s needs review by factory-source"%req.reqid)
-            query = { 'cmd': 'addreview' }
-            query['by_user'] = "factory-source"
-            url = osc.core.makeurl(self.apiurl, ['request', req.reqid], query)
-            if not self.dryrun:
-                r = osc.core.http_POST(url, data="need Factory review")
-                code = ET.parse(r).getroot().get('code')
-                if code != 'ok':
-                    self.logger.error("failed to add reviewer")
-                    overall = None
-            else:
-                self.logger.info("POST "+url)
+            if self.add_review(req, by_user =  "factory-source") != True:
+                overall = None
+
+        if needs_maintainer_review:
+            for p in needs_maintainer_review:
+                self.add_devel_project_review(req, p)
 
         return overall
 
@@ -133,15 +177,7 @@ class CommandLineInterface(cmdln.Cmdln):
         if self.checker.review_user is None:
             raise osc.oscerr.WrongArgs("missing user")
 
-        review = "@by_user='%s'+and+@state='new'"%self.checker.review_user
-        url = osc.core.makeurl(self.checker.apiurl, ('search', 'request'), "match=state/@name='review'+and+review[%s]"%review)
-        root = ET.parse(osc.core.http_GET(url)).getroot()
-
-        for request in root.findall('request'):
-            req = osc.core.Request()
-            req.read(request)
-            self.checker.requests.append(req)
-
+        self.checker.set_request_ids_search_review()
         self.checker.check_requests()
 
 
