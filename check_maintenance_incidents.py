@@ -78,7 +78,8 @@ class MaintenanceChecker(Checker):
                 # check if there is a link and use that or the real package
                 # name as src_packge may end with something like
                 # .openSUSE_XX.Y_Update
-                (linkprj, linkpkg) = self._get_linktarget(a.src_project, a.src_package)
+                pkgname = a.src_package
+                (linkprj, linkpkg) = self._get_linktarget(a.src_project, pkgname)
                 if linkpkg is not None:
                     pkgname = linkpkg
                 maintainers = set(self._maintainers(pkgname))
