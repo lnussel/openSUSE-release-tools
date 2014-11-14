@@ -71,6 +71,7 @@ class MaintenanceChecker(Checker):
         overall = None
         add_factory_source = False
         needs_maintainer_review = set()
+        self.logger.info("checking %s", req.reqid)
         for a in req.actions:
             if a.type == 'maintenance_incident':
                 foundone = False
@@ -93,8 +94,8 @@ class MaintenanceChecker(Checker):
                             if r.by_user in maintainers:
                                 self.logger.debug("found %s as reviewer"%r.by_user)
                                 foundone = True
-                    self.logger.info("author: %s, maintainers: %s => need review"%(author, ','.join(maintainers)))
                     if not foundone:
+                        self.logger.info("author: %s, maintainers: %s => need review"%(author, ','.join(maintainers)))
                         needs_maintainer_review.add(pkgname)
                 else:
                     self.logger.warning("%s doesn't have maintainers"%pkgname)
