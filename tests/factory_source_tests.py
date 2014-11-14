@@ -20,6 +20,7 @@ class TestFactorySourceAccept(unittest.TestCase):
         Initialize the configuration
         """
 
+        httpretty.reset()
         httpretty.enable()
 
         oscrc = os.path.join(FIXTURES, 'oscrc')
