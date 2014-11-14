@@ -34,14 +34,14 @@ import osc.conf
 import osc.core
 import urllib2
 
-from check_source_in_factory import Checker
+import ReviewBot
 
-class MaintenanceChecker(Checker):
+class MaintenanceChecker(ReviewBot.ReviewBot):
     """ simple bot that adds other reviewers depending on target project
     """
 
     def __init__(self, *args, **kwargs):
-        Checker.__init__(self, *args, **kwargs)
+        ReviewBot.ReviewBot.__init__(self, *args, **kwargs)
         self.review_messages = {}
 
     # XXX: share with checkrepo
@@ -67,87 +67,61 @@ class MaintenanceChecker(Checker):
             self.add_review(req, by_project = prj, by_package = pkg,
                     msg = "Submission by someone who is not maintainer in the devel project. Please review")
 
+    def check_action_maintenance_incident(self, req, a):
+        known_maintainer = False
+        author = req.get_creator()
+        # check if there is a link and use that or the real package
+        # name as src_packge may end with something like
+        # .openSUSE_XX.Y_Update
+        pkgname = a.src_package
+        (linkprj, linkpkg) = self._get_linktarget(a.src_project, pkgname)
+        if linkpkg is not None:
+            pkgname = linkpkg
+        maintainers = set(self._maintainers(pkgname))
+        if maintainers:
+            for m in maintainers:
+                if author == m:
+                    self.logger.debug("%s is maintainer"%author)
+                    known_maintainer = True
+            if not known_maintainer:
+                for r in req.reviews:
+                    if r.by_user in maintainers:
+                        self.logger.debug("found %s as reviewer"%r.by_user)
+                        known_maintainer = True
+            if not known_maintainer:
+                self.logger.info("author: %s, maintainers: %s => need review"%(author, ','.join(maintainers)))
+                self.needs_maintainer_review.add(pkgname)
+        else:
+            self.logger.warning("%s doesn't have maintainers"%pkgname)
+
+        if a.tgt_releaseproject == "openSUSE:CPE:SLE-12":
+            self.add_factory_source = True
+
+        return True
+
     def check_one_request(self, req):
-        overall = None
-        add_factory_source = False
-        needs_maintainer_review = set()
-        self.logger.info("checking %s", req.reqid)
-        for a in req.actions:
-            if a.type == 'maintenance_incident':
-                foundone = False
-                author = req.get_creator()
-                # check if there is a link and use that or the real package
-                # name as src_packge may end with something like
-                # .openSUSE_XX.Y_Update
-                pkgname = a.src_package
-                (linkprj, linkpkg) = self._get_linktarget(a.src_project, pkgname)
-                if linkpkg is not None:
-                    pkgname = linkpkg
-                maintainers = set(self._maintainers(pkgname))
-                if maintainers:
-                    for m in maintainers:
-                        if author == m:
-                            self.logger.debug("%s is maintainer"%author)
-                            foundone = True
-                    if not foundone:
-                        for r in req.reviews:
-                            if r.by_user in maintainers:
-                                self.logger.debug("found %s as reviewer"%r.by_user)
-                                foundone = True
-                    if not foundone:
-                        self.logger.info("author: %s, maintainers: %s => need review"%(author, ','.join(maintainers)))
-                        needs_maintainer_review.add(pkgname)
-                else:
-                    self.logger.warning("%s doesn't have maintainers"%pkgname)
+        self.add_factory_source = False
+        self.needs_maintainer_review = set()
 
-                if a.tgt_releaseproject == "openSUSE:CPE:SLE-12":
-                    add_factory_source = True
+        ret = ReviewBot.ReviewBot.check_one_request(self, req)
 
-                ret = True
-            else:
-                self.logger.error("unhandled request type %s"%a.type)
-                ret = None
-            if ret == False or overall is None and ret is not None:
-                overall = ret
-
-        if add_factory_source:
+        if self.add_factory_source:
             self.logger.debug("%s needs review by factory-source"%req.reqid)
             if self.add_review(req, by_user =  "factory-source") != True:
-                overall = None
+                ret = None
 
-        if needs_maintainer_review:
-            for p in needs_maintainer_review:
+        if self.needs_maintainer_review:
+            for p in self.needs_maintainer_review:
                 self.add_devel_project_review(req, p)
 
-        return overall
+        return ret
 
-class CommandLineInterface(cmdln.Cmdln):
+class CommandLineInterface(ReviewBot.CommandLineInterface):
+
     def __init__(self, *args, **kwargs):
-        cmdln.Cmdln.__init__(self, *args, **kwargs)
+        ReviewBot.CommandLineInterface.__init__(self, args, kwargs)
 
-    def get_optparser(self):
-        parser = cmdln.CmdlnOptionParser(self)
-        parser.add_option("--apiurl", '-A', metavar="URL", help="api url")
-        parser.add_option("--user",  metavar="USER", help="reviewer user name")
-        parser.add_option("--dry", action="store_true", help="dry run")
-        parser.add_option("--debug", action="store_true", help="debug output")
-        parser.add_option("--osc-debug", action="store_true", help="osc debug output")
-        parser.add_option("--verbose", action="store_true", help="verbose")
-
-        return parser
-
-    def postoptparse(self):
-        logging.basicConfig()
-        self.logger = logging.getLogger(self.optparser.prog)
-        if (self.options.debug):
-            self.logger.setLevel(logging.DEBUG)
-        elif (self.options.verbose):
-            self.logger.setLevel(logging.INFO)
-
-        osc.conf.get_config(override_apiurl = self.options.apiurl)
-
-        if (self.options.osc_debug):
-            osc.conf.config['debug'] = 1
+    def setup_checker(self):
 
         apiurl = osc.conf.config['apiurl']
         if apiurl is None:
@@ -156,32 +130,10 @@ class CommandLineInterface(cmdln.Cmdln):
         if user is None:
             user = osc.conf.get_apiurl_usr(apiurl)
 
-        self.checker = MaintenanceChecker(apiurl = apiurl, \
+        return MaintenanceChecker(apiurl = apiurl, \
                 dryrun = self.options.dry, \
                 user = user, \
                 logger = self.logger)
-
-    def do_id(self, subcmd, opts, *args):
-        """${cmd_name}: print the status of working copy files and directories
-
-        ${cmd_usage}
-        ${cmd_option_list}
-        """
-        self.checker.set_request_ids(args)
-        self.checker.check_requests()
-
-    def do_review(self, subcmd, opts, *args):
-        """${cmd_name}: print the status of working copy files and directories
-
-        ${cmd_usage}
-        ${cmd_option_list}
-        """
-        if self.checker.review_user is None:
-            raise osc.oscerr.WrongArgs("missing user")
-
-        self.checker.set_request_ids_search_review()
-        self.checker.check_requests()
-
 
 if __name__ == "__main__":
     app = CommandLineInterface()

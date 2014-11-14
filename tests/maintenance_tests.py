@@ -13,6 +13,9 @@ from check_maintenance_incidents import MaintenanceChecker
 APIURL = 'https://maintenancetest.example.com'
 FIXTURES = os.path.join(os.getcwd(), 'tests/fixtures')
 
+def rr(s):
+    return re.compile(re.escape(APIURL + s))
+
 class TestMaintenance(unittest.TestCase):
 
     def setUp(self):
@@ -40,8 +43,7 @@ class TestMaintenance(unittest.TestCase):
     def test_non_maintainer_submit(self):
 
         httpretty.register_uri(httpretty.GET,
-            #re.compile(APIURL + "/search/request\?match=state/@name='review'\+and\+review\[@by_user='maintbot'\+and\+@state='new'\]&withhistory=1"),
-            re.compile(re.escape(APIURL + "/search/request?match=state/@name='review'+and+review[@by_user='maintbot'+and+@state='new']&withhistory=1")),
+            rr("/search/request?match=state/@name='review'+and+review[@by_user='maintbot'+and+@state='new']&withhistory=1"),
             match_querystring = True,
             body = """
                 <collection matches="1">
@@ -127,7 +129,7 @@ class TestMaintenance(unittest.TestCase):
             body = lambda method, uri, headers: change_request(result, method, uri, headers))
 
         httpretty.register_uri(httpretty.GET,
-            re.compile(re.escape(APIURL + "/search/owner?binary=mysql-workbench")),
+            rr("/search/owner?binary=mysql-workbench"),
             match_querystring = True,
             body = """
                 <collection>
@@ -147,7 +149,7 @@ class TestMaintenance(unittest.TestCase):
     def test_cpe_submit(self):
 
         httpretty.register_uri(httpretty.GET,
-            re.compile(re.escape(APIURL + "/search/request?match=state/@name='review'+and+review[@by_user='maintbot'+and+@state='new']&withhistory=1")),
+            rr("/search/request?match=state/@name='review'+and+review[@by_user='maintbot'+and+@state='new']&withhistory=1"),
             match_querystring = True,
             body = """
                 <collection matches="1">
@@ -201,7 +203,7 @@ class TestMaintenance(unittest.TestCase):
             """)
 
         httpretty.register_uri(httpretty.GET,
-            re.compile(re.escape(APIURL + "/search/owner?binary=plan")),
+            rr("/search/owner?binary=plan"),
             match_querystring = True,
             body = """
                 <collection/>

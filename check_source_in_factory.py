@@ -33,123 +33,49 @@ except ImportError:
 import osc.conf
 import osc.core
 import urllib2
+import ReviewBot
 
-class Checker(object):
+class FactorySourceChecker(ReviewBot.ReviewBot):
+    """ this review bot checks if the sources of a submission are
+    either in Factory or a request for Factory with the same sources
+    exist. If the latter a request is only accepted if the Factory
+    request is reviewed positive."""
 
-    def __init__(self, apiurl = None, factory = None, dryrun = False, logger = None, user = None):
-        self.apiurl = apiurl
-        self.factory = factory if factory else "openSUSE:Factory"
-        self.dryrun = dryrun
-        self.logger = logger
-        self.review_user = user
-        self.requests = []
+    def __init__(self, *args, **kwargs):
+        self.factory = None
+        if 'factory' in kwargs:
+            self.factory = kwargs['factory']
+            del kwargs['factory']
+        if self.factory is None:
+            self.factory = "openSUSE:Factory"
+        ReviewBot.ReviewBot.__init__(self, *args, **kwargs)
         self.review_messages = { 'accepted' : 'ok', 'declined': 'the package needs to be accepted in Factory first' }
 
-    def set_request_ids(self, ids):
-        for rqid in ids:
-            u = osc.core.makeurl(self.apiurl, [ 'request', rqid ], { 'withhistory' : '1' })
-            r = osc.core.http_GET(u)
-            root = ET.parse(r).getroot()
-            req = osc.core.Request()
-            req.read(root)
-            self.requests.append(req)
+    def check_action_maintenance_incident(self, req, a):
+        rev = self._get_verifymd5(a.src_project, a.src_package, a.src_rev)
+        return self._check_package(a.src_project, a.src_package, rev, a.tgt_releaseproject, a.src_package)
 
-    def check_requests(self):
-        for req in self.requests:
-            good = self.check_one_request(req)
-
-            if good is None:
-                self.logger.info("ignoring")
-            elif good:
-                self.logger.info("%s is good"%req.reqid)
-                self._set_review(req, 'accepted')
-            else:
-                self.logger.info("%s is not acceptable"%req.reqid)
-                self._set_review(req, 'declined')
-
-    def _set_review(self, req, state):
-        if not self.review_user:
-            return
-
-        review_state = self.get_review_state(req.reqid, self.review_user)
-        if review_state == 'new':
-            self.logger.debug("setting %s to %s"%(req.reqid, state))
-            if not self.dryrun:
-                msg = self.review_messages[state] if state in self.review_messages else state
-                osc.core.change_review_state(apiurl = self.apiurl,
-                        reqid = req.reqid, newstate = state,
-                        by_user=self.review_user, message=msg)
-        elif review_state == '':
-            self.logger.info("can't change state, %s does not have '%s' as reviewer"%(req.reqid, self.review_user))
-        else:
-            self.logger.debug("%s review in state '%s' not changed"%(req.reqid, review_state))
-
-    def add_review(self, req, by_group=None, by_user=None, by_project = None, by_package = None, msg=None):
-        query = {
-            'cmd': 'addreview'
-        }
-        if by_group:
-            query['by_group'] = by_group
-        elif by_user:
-            query['by_user'] = by_user
-        elif by_project:
-            query['by_project'] = by_project
-            if by_package:
-                query['by_package'] = by_package
-        else:
-            raise osc.oscerr.WrongArgs("missing by_*")
-
-        u = osc.core.makeurl(self.apiurl, ['request', req.reqid], query)
-        if self.dryrun:
-            self.logger.info('POST %s' % u)
-            return True
-
-        try:
-            r = osc.core.http_POST(u, data=msg)
-        except urllib2.HTTPError, e:
-            self.logger.error(e)
+    def check_action_maintenance_release(self, req, a):
+        pkgname = a.src_package
+        if pkgname == 'patchinfo':
+            return None
+        linkpkg = self._get_linktarget_self(a.src_project, pkgname)
+        if linkpkg is not None:
+            pkgname = linkpkg
+        # packages in maintenance have links to the target. Use that
+        # to find the real package name
+        (linkprj, linkpkg) = self._get_linktarget(a.src_project, pkgname)
+        if linkpkg is None or linkprj is None or linkprj != a.tgt_project:
+            self.logger.error("%s/%s is not a link to %s"%(a.src_project, pkgname, a.tgt_project))
             return False
+        else:
+            pkgname = linkpkg
+        src_rev = self._get_verifymd5(a.src_project, a.src_package)
+        return self._check_package(a.src_project, a.src_package, src_rev, a.tgt_project, pkgname)
 
-        code = ET.parse(r).getroot().attrib['code']
-        if code != 'ok':
-            self.logger.error("invalid return code %s"%code)
-            return False
-
-        return True
-
-    def check_one_request(self, req):
-        overall = None
-        for a in req.actions:
-            if a.type == 'maintenance_incident':
-                rev = self._get_verifymd5(a.src_project, a.src_package, a.src_rev)
-                ret = self._check_package(a.src_project, a.src_package, rev, a.tgt_releaseproject, a.src_package)
-            elif a.type == 'maintenance_release':
-                pkgname = a.src_package
-                if pkgname == 'patchinfo':
-                    continue
-                linkpkg = self._get_linktarget_self(a.src_project, pkgname)
-                if linkpkg is not None:
-                    pkgname = linkpkg
-                # packages in maintenance have links to the target. Use that
-                # to find the real package name
-                (linkprj, linkpkg) = self._get_linktarget(a.src_project, pkgname)
-                if linkpkg is None or linkprj is None or linkprj != a.tgt_project:
-                    self.logger.error("%s/%s is not a link to %s"%(a.src_project, pkgname, a.tgt_project))
-                    overall = False
-                    break
-                else:
-                    pkgname = linkpkg
-                src_rev = self._get_verifymd5(a.src_project, a.src_package)
-                ret = self._check_package(a.src_project, a.src_package, src_rev, a.tgt_project, pkgname)
-            elif a.type == 'submit':
-                rev = self._get_verifymd5(a.src_project, a.src_package, a.src_rev)
-                ret = self._check_package(a.src_project, a.src_package, rev, a.tgt_package, a.tgt_package)
-            else:
-                self.logger.error("unhandled request type %s"%a.type)
-                ret = None
-            if ret == False or overall is None and ret is not None:
-                overall = ret
-        return overall
+    def check_action_submit(self, req, a):
+        rev = self._get_verifymd5(a.src_project, a.src_package, a.src_rev)
+        return self._check_package(a.src_project, a.src_package, rev, a.tgt_package, a.tgt_package)
 
     def _check_package(self, src_project, src_package, src_rev, target_project, target_package):
         self.logger.info("%s/%s@%s -> %s/%s"%(src_project, src_package, src_rev, target_project, target_package))
@@ -164,7 +90,6 @@ class Checker(object):
             self.logger.info("%s already reviewed for Factory"%target_package)
 
         return good
-
 
     def _check_factory(self, rev, package):
         """check if factory sources contain the package and revision. check head and history"""
@@ -217,94 +142,18 @@ class Checker(object):
                         return None
         return False
 
-    # XXX used in other modules
-    def _get_verifymd5(self, src_project, src_package, rev=None):
-        query = { 'view': 'info' }
-        if rev:
-            query['rev'] = rev
-        url = osc.core.makeurl(self.apiurl, ('source', src_project, src_package), query=query)
-        try:
-            root = ET.parse(osc.core.http_GET(url)).getroot()
-        except urllib2.HTTPError:
-            return None
+class CommandLineInterface(ReviewBot.CommandLineInterface):
 
-        if root is not None:
-            srcmd5 = root.get('verifymd5')
-            return srcmd5
-
-    # TODO: what if there is more than _link?
-    def _get_linktarget_self(self, src_project, src_package):
-        """ if it's a link to a package in the same project return the name of the package"""
-        prj, pkg = self._get_linktarget(src_project, src_package)
-        if prj is None or prj == src_project:
-            return pkg
-
-    def _get_linktarget(self, src_project, src_package):
-
-        query = {}
-        url = osc.core.makeurl(self.apiurl, ('source', src_project, src_package), query=query)
-        try:
-            root = ET.parse(osc.core.http_GET(url)).getroot()
-        except urllib2.HTTPError:
-            return (None, None)
-
-        if root is not None:
-            linkinfo = root.find("linkinfo")
-            if linkinfo is not None:
-                return (linkinfo.get('project'), linkinfo.get('package'))
-
-    # XXX used in other modules
-    def get_review_state(self, request_id, user):
-        """Return the current review state of the request."""
-        states = []
-        url = osc.core.makeurl(self.apiurl, ('request', str(request_id)))
-        try:
-            root = ET.parse(osc.core.http_GET(url)).getroot()
-            states = [review.get('state') for review in root.findall('review') if review.get('by_user') == user]
-        except urllib2.HTTPError, e:
-            print('ERROR in URL %s [%s]' % (url, e))
-        return states[0] if states else ''
-
-    def set_request_ids_search_review(self, user = None):
-        if user is None:
-            user = self.review_user
-        review = "@by_user='%s'+and+@state='new'"%user
-        url = osc.core.makeurl(self.apiurl, ('search', 'request'), "match=state/@name='review'+and+review[%s]&withhistory=1"%review)
-        root = ET.parse(osc.core.http_GET(url)).getroot()
-
-        for request in root.findall('request'):
-            req = osc.core.Request()
-            req.read(request)
-            self.requests.append(req)
-
-class CommandLineInterface(cmdln.Cmdln):
     def __init__(self, *args, **kwargs):
-        cmdln.Cmdln.__init__(self, args, kwargs)
+        ReviewBot.CommandLineInterface.__init__(self, args, kwargs)
 
     def get_optparser(self):
-        parser = cmdln.CmdlnOptionParser(self)
+        parser = ReviewBot.CommandLineInterface.get_optparser(self)
         parser.add_option("--factory", metavar="project", help="the openSUSE Factory project")
-        parser.add_option("--apiurl", '-A', metavar="URL", help="api url")
-        parser.add_option("--user",  metavar="USER", help="reviewer user name")
-        parser.add_option("--dry", action="store_true", help="dry run")
-        parser.add_option("--debug", action="store_true", help="debug output")
-        parser.add_option("--osc-debug", action="store_true", help="osc debug output")
-        parser.add_option("--verbose", action="store_true", help="verbose")
 
         return parser
 
-    def postoptparse(self):
-        logging.basicConfig()
-        self.logger = logging.getLogger(self.optparser.prog)
-        if (self.options.debug):
-            self.logger.setLevel(logging.DEBUG)
-        elif (self.options.verbose):
-            self.logger.setLevel(logging.INFO)
-
-        osc.conf.get_config(override_apiurl = self.options.apiurl)
-
-        if (self.options.osc_debug):
-            osc.conf.config['debug'] = 1
+    def setup_checker(self):
 
         apiurl = osc.conf.config['apiurl']
         if apiurl is None:
@@ -313,33 +162,11 @@ class CommandLineInterface(cmdln.Cmdln):
         if user is None:
             user = osc.conf.get_apiurl_usr(apiurl)
 
-        self.checker = Checker(apiurl = apiurl, \
+        return FactorySourceChecker(apiurl = apiurl, \
                 factory = self.options.factory, \
                 dryrun = self.options.dry, \
                 user = user, \
                 logger = self.logger)
-
-    def do_id(self, subcmd, opts, *args):
-        """${cmd_name}: print the status of working copy files and directories
-
-        ${cmd_usage}
-        ${cmd_option_list}
-        """
-        self.checker.set_request_ids(args)
-        self.checker.check_requests()
-
-    def do_review(self, subcmd, opts, *args):
-        """${cmd_name}: print the status of working copy files and directories
-
-        ${cmd_usage}
-        ${cmd_option_list}
-        """
-        if self.checker.review_user is None:
-            raise osc.oscerr.WrongArgs("missing user")
-
-        self.checker.set_request_ids_search_review()
-        self.checker.check_requests()
-
 
 if __name__ == "__main__":
     app = CommandLineInterface()
