@@ -62,6 +62,7 @@ class ReviewBot(object):
 
     def check_requests(self):
         for req in self.requests:
+            self.logger.debug("checking %s"%req.reqid)
             good = self.check_one_request(req)
 
             if good is None:

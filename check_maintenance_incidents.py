@@ -77,6 +77,9 @@ class MaintenanceChecker(ReviewBot.ReviewBot):
         (linkprj, linkpkg) = self._get_linktarget(a.src_project, pkgname)
         if linkpkg is not None:
             pkgname = linkpkg
+        if pkgname == 'patchinfo':
+            return None
+
         maintainers = set(self._maintainers(pkgname))
         if maintainers:
             for m in maintainers:
