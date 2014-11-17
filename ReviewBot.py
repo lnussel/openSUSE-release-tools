@@ -180,6 +180,8 @@ class ReviewBot(object):
             if linkinfo is not None:
                 return (linkinfo.get('project'), linkinfo.get('package'))
 
+        return (None, None)
+
     # XXX used in other modules
     def get_review_state(self, request_id, user):
         """Return the current review state of the request."""
