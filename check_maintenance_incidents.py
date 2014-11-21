@@ -61,9 +61,14 @@ class MaintenanceChecker(ReviewBot.ReviewBot):
         }
         url = osc.core.makeurl(self.apiurl, ('search', 'owner'), query=query)
         root = ET.parse(osc.core.http_GET(url)).getroot()
+
+        package_reviews = set((r.by_project, r.by_package) for r in req.reviews if r.by_package)
         for p in root.findall('./owner'):
             prj = p.get("project")
             pkg = p.get("package")
+            if ((pkg, prj) in package_reviews):
+                # there already is a review for this project/package
+                continue
             self.add_review(req, by_project = prj, by_package = pkg,
                     msg = "Submission by someone who is not maintainer in the devel project. Please review")
 
