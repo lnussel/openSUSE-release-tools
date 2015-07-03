@@ -6,3 +6,6 @@ PartOf=opensuse-repo-checker.target
 ExecStart=/usr/bin/osc check_repo -p %i --dry
 User=_opensuse-repo-checker
 SyslogIdentifier=opensuse-repo-checker
+
+[Install]
+WantedBy=multi-user.target

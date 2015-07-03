@@ -7,3 +7,6 @@ ExecStart=/usr/bin/screen -DmS abichecker /usr/share/osc-plugin-factory/abicheck
 ExecStop=/usr/bin/screen -S abichecker -X quit
 WorkingDirectory=/usr/share/osc-plugin-factory/abichecker
 User=_opensuse.org-abi-checker
+
+[Install]
+WantedBy=multi-user.target
