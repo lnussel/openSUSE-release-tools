@@ -1,5 +1,5 @@
-ToTest Plugin Documentation
-===========================
+openSUSE ToTest Manager Documentation
+=====================================
 :author: openSUSE Team at SUSE
 :toc:
 
@@ -36,17 +36,12 @@ Clone this repository:
 git clone https://github.com/openSUSE/osc-plugin-factory.git
 -------------------------------------------------------------------------------
 
-Link the plugin and the library in +~/.osc-plugins+ or +/var/lib/osc-plugins+.
-
--------------------------------------------------------------------------------
-cd osc-plugin-factory
-ln -sr ./osc-totest.py ./osclib ~/.osc-plugins
--------------------------------------------------------------------------------
-
+The totest manager needs maintainer permissions in the :ToTest project
 
 Command line
 ------------
 [id="cli"]
 
-This plugin do not have any parameters, and need to be executed with
-the proper permissions in OBS.
+-------------------------------------------------------------------------------
+./totest-manager.py --verbose --osc-debug run -n 20 Factory:ARM
+-------------------------------------------------------------------------------

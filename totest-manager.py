@@ -206,7 +206,7 @@ class ToTestBase(object):
         for repo in root.findall('result'):
             # ignore ports. 'factory' is used by arm for repos that are not
             # meant to use the totest manager.
-            if repo.get('repository') in ('ports', 'factory'):
+            if repo.get('repository') in ('ports', 'factory', 'images_staging'):
                 continue
             # ignore 32bit for now. We're only interesed in aarch64 here
             if repo.get('arch') in ('armv6l', 'armv7l'):
@@ -305,6 +305,9 @@ class ToTestBase(object):
 
         if set_release:
             query['setrelease'] = set_release
+        # FIXME: make configurable. openSUSE:Factory:ARM currently has multiple
+        # repos with release targets, so obs needs to know which one to release
+        query['repository'] = 'images'
 
         baseurl = ['source', project, package]
 
