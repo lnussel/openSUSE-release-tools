@@ -331,7 +331,6 @@ class OpenQABot(ReviewBot.ReviewBot):
         self.force = False
         self.openqa = None
         self.do_comments = True
-        self.do_reviews = True
         if 'force' in kwargs:
             if kwargs['force'] == True:
                 self.force = True
@@ -343,10 +342,6 @@ class OpenQABot(ReviewBot.ReviewBot):
             if kwargs['do_comments'] is not None:
                 self.do_comments = kwargs['do_comments']
             del kwargs['do_comments']
-        if 'do_reviews' in kwargs:
-            if kwargs['do_reviews'] is not None:
-                self.do_reviews = kwargs['do_reviews']
-            del kwargs['do_reviews']
 
         ReviewBot.ReviewBot.__init__(self, *args, **kwargs)
 
@@ -563,9 +558,6 @@ class OpenQABot(ReviewBot.ReviewBot):
             self.logger.error(traceback.format_exc())
             ret = None
 
-        if not self.do_reviews:
-            ret = None
-
         return ret
 
     def find_obs_request_comment(self, req, state = None):
@@ -587,7 +579,6 @@ class CommandLineInterface(ReviewBot.CommandLineInterface):
     def get_optparser(self):
         parser = ReviewBot.CommandLineInterface.get_optparser(self)
         parser.add_option("--force", action="store_true", help="recheck requests that are already considered done")
-        parser.add_option("--no-review", dest='review', action="store_false", help="don't actually accept or decline, just comment")
         parser.add_option("--no-comment", dest='comment', action="store_false", help="don't actually post comments to obs")
         parser.add_option("--openqa", metavar='HOST', help="openqa api host")
         return parser
@@ -610,7 +601,6 @@ class CommandLineInterface(ReviewBot.CommandLineInterface):
         return OpenQABot(apiurl = apiurl, \
                 dryrun = self.options.dry, \
                 user = user, \
-                do_reviews = self.options.review, \
                 do_comments = self.options.comment, \
                 openqa = self.options.openqa, \
                 force = self.options.force, \
