@@ -492,7 +492,7 @@ class OpenQABot(ReviewBot.ReviewBot):
                 'distri' : settings['DISTRI'],
                 'version' : settings['VERSION'],
                 'build' : settings['BUILD'],
-            }).replace('&', "%26")
+            }) #.replace('&', "%26")
 
 
     def find_failed_modules(self, job):
