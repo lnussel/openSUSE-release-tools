@@ -483,7 +483,9 @@ class OpenQABot(ReviewBot.ReviewBot):
         comment += "\n" + msg
 
         self.logger.debug("adding comment to %s, state %s result %s", req.reqid, state, result)
-        self.commentapi.add_comment(request_id = req.reqid, comment = comment)
+        self.logger.debug("message: %s", msg)
+        if not self.dryrun:
+            self.commentapi.add_comment(request_id = req.reqid, comment = comment)
 
     def openqa_overview_url_from_settings(self, settings):
         return osc.core.makeurl( self.openqa.baseurl, [ 'tests', 'overview'], {
@@ -491,6 +493,15 @@ class OpenQABot(ReviewBot.ReviewBot):
                 'version' : settings['VERSION'],
                 'build' : settings['BUILD'],
             }).replace('&', "%26")
+
+
+    def find_failed_modules(self, job):
+        failed = []
+        for module in job['modules']:
+            if module['result'] != 'failed':
+                continue
+            failed.append(module['name'])
+        return failed
 
     def check_one_request(self, req):
         ret = None
@@ -511,7 +522,8 @@ class OpenQABot(ReviewBot.ReviewBot):
                     (comment_id, comment_state, comment_result) = self.find_obs_request_comment(req)
                     if comment_id is not None:
                         self.logger.debug("deleting old comment %s", comment_id)
-                        self.commentapi.delete(comment_id)
+                        if not self.dryrun:
+                            self.commentapi.delete(comment_id)
 
                 if not jobs:
                     msg = "no openQA tests defined"
@@ -521,16 +533,24 @@ class OpenQABot(ReviewBot.ReviewBot):
                     self.logger.debug("url %s", url)
                     msg = "now testing in [openQA](%s)"%url
                     self.add_comment(req, msg, 'seen')
-            elif qa_state == QA_FAILED:
-                self.logger.debug("request %s failed", req.reqid)
+            elif qa_state == QA_FAILED or qa_state == QA_PASSED:
                 url = self.openqa_overview_url_from_settings(jobs[0]['settings'])
-                msg = "openQA test *[FAILED](%s)*"%url
-                self.add_comment(req, msg, 'done', 'declined')
-            elif qa_state == QA_PASSED:
-                self.logger.debug("request %s passed", req.reqid)
-                url = self.openqa_overview_url_from_settings(jobs[0]['settings'])
-                msg = "openQA test [passed](%s)"%url
-                self.add_comment(req, msg, 'done', 'accepted')
+                if qa_state == QA_PASSED:
+                    self.logger.debug("request %s passed", req.reqid)
+                    msg = "openQA test [passed](%s)"%url
+                    state = 'accepted'
+                else:
+                    self.logger.debug("request %s failed", req.reqid)
+                    msg = "openQA test *[FAILED](%s)*\n"%url
+                    state = 'declined'
+                for job in jobs:
+                    modules = self.find_failed_modules(job)
+                    if modules != []:
+                        msg += '\n* [%s](%s) failed %s in %s'%(
+                            job['id'],
+                            osc.core.makeurl( self.openqa.baseurl, [ 'tests', str(job['id'])]),
+                            job['settings']['TEST'], ','.join(modules))
+                self.add_comment(req, msg, 'done', state)
             elif qa_state == QA_INPROGRESS:
                 self.logger.debug("request %s still in progress", req.reqid)
             else:
