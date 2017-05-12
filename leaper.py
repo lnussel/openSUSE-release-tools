@@ -103,18 +103,6 @@ class Leaper(ReviewBot.ReviewBot):
             self.packages[project] = self.get_source_packages(project)
         return True if package in self.packages[project] else False
 
-    def rdiff_link(self, src_project, src_package, src_rev, target_project, target_package = None):
-        if target_package is None:
-            target_package = src_package
-
-        return '[%(target_project)s/%(target_package)s](/package/rdiff/%(src_project)s/%(src_package)s?opackage=%(target_package)s&oproject=%(target_project)s&rev=%(src_rev)s)'%{
-                'src_project': src_project,
-                'src_package': src_package,
-                'src_rev': src_rev,
-                'target_project': target_project,
-                'target_package': target_package,
-                }
-
     def _check_same_origin(self, origin, project):
 
         if origin == 'FORK':

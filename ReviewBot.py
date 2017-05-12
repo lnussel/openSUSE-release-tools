@@ -421,6 +421,18 @@ class ReviewBot(object):
 
         self.comment_handler_remove()
 
+    def rdiff_link(self, src_project, src_package, src_rev, target_project, target_package = None, target_rev = None):
+        if target_package is None:
+            target_package = src_package
+
+        return '[%(target_project)s/%(target_package)s](/package/rdiff/%(src_project)s/%(src_package)s?opackage=%(target_package)s&oproject=%(target_project)s&rev=%(src_rev)s&orev=%(target_rev)s)'%{
+                'src_project': src_project,
+                'src_package': src_package,
+                'src_rev': src_rev,
+                'target_project': target_project,
+                'target_package': target_package,
+                'target_rev': target_rev if target_rev is not None else '',
+                }
 
 class CommentFromLogHandler(logging.Handler):
     def __init__(self, level=logging.INFO):
