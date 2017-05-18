@@ -149,7 +149,7 @@ conn = httplib.HTTPConnection(u.hostname, 80)
 conn.request('GET', u.path)
 res = conn.getresponse()
 if res.status != 200:
-    raise Exception("http fail: %s %s" % (res.status, res.reason))
+    raise Exception("http fail on %s: %s %s" % (u, res.status, res.reason))
 
 txt = res.read()
 if "====" not in txt:

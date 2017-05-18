@@ -21,6 +21,7 @@
 # SOFTWARE.
 
 from xml.etree import cElementTree as ET
+from collections import namedtuple
 import sys
 import cmdln
 import logging
@@ -29,89 +30,118 @@ import osc.core
 
 import ToolBase
 
-makeurl = osc.core.makeurl
-
 logger = logging.getLogger()
 
 FACTORY = "openSUSE:Factory"
+
+SourceInfo = namedtuple('SourceInfo', ('package', 'vrev', 'srcmd5', 'verifymd5', 'linked'))
+LinkedInfo = namedtuple('LinkedInfo', ('project', 'package'))
 
 class Freezer(ToolBase.ToolBase):
 
     def __init__(self, project):
         ToolBase.ToolBase.__init__(self)
         self.project = project
-        self.packages = []
+        self.packages = dict()
 
-        self.set_links()
+    def _init(self):
+        self._init_links()
+        self._init_sourceinfo()
 
-    def set_links(self):
+    def _init_links(self):
         url = self.makeurl(['source', self.project, '_meta'])
-        f = self.retried_GET(url)
-        root = ET.parse(f).getroot()
+        root = ET.fromstring(self.cached_GET(url))
         links = root.findall('link')
         links.reverse()
         self.projectlinks = [link.get('project') for link in links]
         logger.debug("links %s", self.projectlinks)
 
-    def freeze_prjlinks(self):
-        sources = {}
-        flink = ET.Element('frozenlinks')
+    def _init_sourceinfo(self):
+        for prj in [ self.project ] + self.projectlinks:
+            url = self.makeurl(['source', prj], {'view': 'info', 'nofilename': '1'})
+            root = ET.fromstring(self.cached_GET(url))
 
-        for lprj in self.projectlinks:
-            fl = ET.SubElement(flink, 'frozenlink', {'project': lprj})
-            sources = self.receive_sources(lprj, sources, fl)
+            for node in root.findall('sourceinfo'):
+                attrs = [node.get(i, None) for i in SourceInfo._fields]
+                for linked in node.findall('linked'):
+                    if attrs[-1] is None:
+                        attrs[-1] = []
+                    attrs[-1].append(LinkedInfo(*[linked.get(i, None) for i in LinkedInfo._fields]))
+                si = SourceInfo(*attrs)
+                self.packages.setdefault(prj, dict())[si.package] = si
 
-        url = self.api.makeurl(['source', self.prj, '_project', '_frozenlinks'], {'meta': '1'})
-        self.api.retried_PUT(url, ET.tostring(flink))
-
-    def receive_sources(self, prj, sources, flink):
-        url = self.api.makeurl(['source', prj], {'view': 'info', 'nofilename': '1'})
-        f = self.api.retried_GET(url)
-        root = ET.parse(f).getroot()
-
-        for si in root.findall('sourceinfo'):
-            package = self.check_one_source(flink, si)
-            sources[package] = 1
-        return sources
-
-    def check_one_source(self, flink, si):
-        package = si.get('package')
-
-        # If the package is an internal one (e.g _product)
-        if package.startswith('_'):
-            return None
-
-        # Ignore packages with an origing (i.e. with an origin
-        # different from the current project)
-        if si.find('originproject') != None:
-            return None
-
-        # we have to check if its a link within the staging project
-        # in this case we need to keep the link as is, and not freezing
-        # the target. Otherwise putting kernel-source into staging prj
-        # won't get updated kernel-default (and many other cases)
-        for linked in si.findall('linked'):
-            if linked.get('project') in self.projectlinks:
-                # take the unexpanded md5 from Factory / 13.2 link
-                url = self.api.makeurl(['source', self.api.project, package],
-                                       {'view': 'info', 'nofilename': '1'})
-                # print(package, linked.get('package'), linked.get('project'))
-                f = self.api.retried_GET(url)
-                proot = ET.parse(f).getroot()
-                lsrcmd5 = proot.get('lsrcmd5')
-                if lsrcmd5 is None:
-                    raise Exception("{}/{} is not a link but we expected one".format(self.api.project, package))
-                ET.SubElement(flink, 'package', {'name': package, 'srcmd5': lsrcmd5, 'vrev': si.get('vrev')})
-                return package
-        if package in ['rpmlint-mini-AGGR']:
-            return package  # we should not freeze aggregates
-        ET.SubElement(flink, 'package', {'name': package, 'srcmd5': si.get('srcmd5'), 'vrev': si.get('vrev')})
-        return package
-
+#    def freeze_prjlinks(self):
+#        sources = {}
+#        flink = ET.Element('frozenlinks')
+#
+#        for lprj in self.projectlinks:
+#            fl = ET.SubElement(flink, 'frozenlink', {'project': lprj})
+#            sources = self.receive_sources(lprj, sources, fl)
+#
+#        url = self.makeurl(['source', self.prj, '_project', '_frozenlinks'], {'meta': '1'})
+#        self.api.retried_PUT(url, ET.tostring(flink))
+#
+#    def receive_sources(self, prj, sources, flink):
+#        url = self.makeurl(['source', prj], {'view': 'info', 'nofilename': '1'})
+#        f = self.api.cached_GET(url)
+#        root = ET.parse(f).getroot()
+#
+#        for si in root.findall('sourceinfo'):
+#            package = self.check_one_source(flink, si)
+#            sources[package] = 1
+#        return sources
+#
+#    def check_one_source(self, flink, si):
+#        package = si.get('package')
+#
+#        # If the package is an internal one (e.g _product)
+#        if package.startswith('_'):
+#            return None
+#
+#        # Ignore packages with an origing (i.e. with an origin
+#        # different from the current project)
+#        if si.find('originproject') != None:
+#            return None
+#
+#        # we have to check if its a link within the staging project
+#        # in this case we need to keep the link as is, and not freezing
+#        # the target. Otherwise putting kernel-source into staging prj
+#        # won't get updated kernel-default (and many other cases)
+#        for linked in si.findall('linked'):
+#            if linked.get('project') in self.projectlinks:
+#                # take the unexpanded md5 from Factory / 13.2 link
+#                url = self.makeurl(['source', self.api.project, package],
+#                                       {'view': 'info', 'nofilename': '1'})
+#                # print(package, linked.get('package'), linked.get('project'))
+#                f = self.api.cached_GET(url)
+#                proot = ET.parse(f).getroot()
+#                lsrcmd5 = proot.get('lsrcmd5')
+#                if lsrcmd5 is None:
+#                    raise Exception("{}/{} is not a link but we expected one".format(self.api.project, package))
+#                ET.SubElement(flink, 'package', {'name': package, 'srcmd5': lsrcmd5, 'vrev': si.get('vrev')})
+#                return package
+#        if package in ['rpmlint-mini-AGGR']:
+#            return package  # we should not freeze aggregates
+#        ET.SubElement(flink, 'package', {'name': package, 'srcmd5': si.get('srcmd5'), 'vrev': si.get('vrev')})
+#        return package
+#
 
     def add(self, *packages):
         True
 
+    def check(self, *packages):
+        self._init()
+        packages = packages[0]
+        if not packages:
+            packages = self.packages[self.project].keys()
+
+        for p in packages:
+            s = set()
+            for prj in self.packages.keys():
+                if p in self.packages[prj]:
+                    s.add(self.packages[prj][p].srcmd5)
+            if len(s) > 1:
+                print p, s
  
 class CommandLineInterface(ToolBase.CommandLineInterface):
 
