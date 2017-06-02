@@ -34,7 +34,7 @@ logger = logging.getLogger()
 
 FACTORY = "openSUSE:Factory"
 
-SourceInfo = namedtuple('SourceInfo', ('package', 'vrev', 'srcmd5', 'verifymd5', 'linked'))
+SourceInfo = namedtuple('SourceInfo', ('package', 'vrev', 'srcmd5', 'verifymd5', 'lsrcmd5', 'linked'))
 LinkedInfo = namedtuple('LinkedInfo', ('project', 'package'))
 
 class Freezer(ToolBase.ToolBase):
@@ -126,21 +126,66 @@ class Freezer(ToolBase.ToolBase):
 #        return package
 #
 
-    def add(self, *packages):
-        True
-
-    def check(self, *packages):
+    def add(self, packages):
         self._init()
-        packages = packages[0]
+        if not packages:
+            raise Exception("need package names")
+        url = self.makeurl(['source', self.project, '_project', '_frozenlinks'], {'meta': '1'})
+        root = None
+        try:
+            root = ET.fromstring(self.cached_GET(url))
+        except urllib2.HTTPError, e:
+            if e.code == 404:
+                pass
+            else:
+                raise
+
+        if root is None:
+            root = ET.Element('frozenlinks')
+            for lprj in self.projectlinks:
+                fl = ET.SubElement(root, 'frozenlink', {'project': lprj})
+
+        changed = False
+        for p in packages:
+            for prj in self.packages.keys():
+                if prj == self.project:
+                    continue
+                if p in self.packages[prj]:
+                    logger.debug("found %s in %s", p, prj)
+                    si = self.packages[prj][p]
+                    #print si
+                    flink = root.find("./frozenlink[@project='{}']".format(prj))
+                    node = flink.find("./package[@name='{}']".format(p))
+                    # not sure this is correct but I suppose we need to do this
+                    # to make local links follow the main package
+                    mymd5 = si.srcmd5 if si.lsrcmd5 is None else si.lsrcmd5
+                    if node is None:
+                        node = ET.SubElement(flink, 'package', {'name': p, 'srcmd5': mymd5, 'vrev': si.vrev })
+                        changed = True
+                    else:
+                        if node.get('srcmd5') != mymd5:
+                            node.set('srcmd5', mymd5)
+                            changed = True
+                        if node.get('vrev') != si.vrev:
+                            node.set('vrev', si.vrev)
+                            changed = True
+                    break
+
+        if changed:
+            self.http_PUT(url, data=ET.tostring(root))
+
+    def check(self, packages):
+        self._init()
         if not packages:
             packages = self.packages[self.project].keys()
 
         for p in packages:
             s = set()
             for prj in self.packages.keys():
+                print p, prj
                 if p in self.packages[prj]:
                     s.add(self.packages[prj][p].srcmd5)
-            if len(s) > 1:
+            if len(s) > 0:
                 print p, s
  
 class CommandLineInterface(ToolBase.CommandLineInterface):
@@ -158,6 +203,7 @@ class CommandLineInterface(ToolBase.CommandLineInterface):
     def setup_tool(self):
         tool = Freezer(self.options.project)
         return tool
+
 
     def do_add(self, subcmd, opts, *packages):
         """${cmd_name}: add packages to freezer
