@@ -173,6 +173,26 @@ class Freezer(ToolBase.ToolBase):
 
         if changed:
             self.http_PUT(url, data=ET.tostring(root))
+            self._invalidate__cached_GET(url)
+
+    def remove(self, packages):
+        self._init()
+        if not packages:
+            raise Exception("need package names")
+        url = self.makeurl(['source', self.project, '_project', '_frozenlinks'], {'meta': '1'})
+        root = ET.fromstring(self.cached_GET(url))
+
+        changed = False
+
+        for p in packages:
+            for flink in root.findall("./frozenlink"):
+                for node in flink.findall(".//package[@name='{}']".format(p)):
+                    flink.remove(node)
+                    changed = True
+
+        if changed:
+            self.http_PUT(url, data=ET.tostring(root))
+            self._invalidate__cached_GET(url)
 
     def check(self, packages):
         self._init()
