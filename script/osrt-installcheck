@@ -1,0 +1,30 @@
+#!/bin/bash
+
+self=$(readlink -e $(type -p "$0"))
+
+arch="x86_64"
+exclude=(--exclude "installation-images-debuginfodeps-openSUSE systemd-mini")
+cachedir=${XDG_CACHE_HOME:-~/.cache}/opensuse-repo-checker
+
+main=openSUSE:Leap:15.0
+repos_i586=($main:Rings:1-MinimalX/standard $main:Rings:0-Bootstrap/standard)
+repos_x86_64=($main:Rings:2-TestDVD/standard $main:Rings:1-MinimalX/standard $main:Rings:0-Bootstrap/standard)
+
+cd "$cachedir"
+
+for arch in x86_64 i586; do
+	eval repos="(\"\${repos_$arch[@]}\")"
+	if ! ${self%/*}/../pkglistgen.py "${repos[@]/#/-r}" -a "$arch" update; then
+		echo "no update in $arch"
+	fi
+	repos=("${repos[@]//\//-}")
+	repos=("${repos[@]/#/repo-}")
+	repos=("${repos[@]/%/-$arch.solv}")
+	for ((i=0;i<"${#repos[@]}"; ++i)); do
+		echo
+		echo "### ${repos[0]}/$arch ###"
+		echo
+		installcheck "$arch" "${repos[0]}" --nocheck "${repos[@]:1}" "${exclude[@]}"
+		repos=("${repos[@]:1}" "${repos[0]}")
+	done
+done
