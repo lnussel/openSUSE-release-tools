@@ -22,6 +22,7 @@ import io
 import os
 import operator
 import re
+import logging
 
 from osc import conf
 
@@ -205,29 +206,36 @@ class Config(object):
         else:
             return defaults
 
-    def _migrate_staging_config(self, api):
+    def _load_legacy_config(self, api, warn=True):
         # first try staging project's dashboard. Can't rely on cstaging as it's
         # defined by config
         config = api.load_file_content(self.project + ':Staging', 'dashboard', 'config')
         if not config:
             config = api.load_file_content(self.project, 'dashboard', 'config')
-        if not config:
-            return None
 
-        print("Found config in staging dashboard - migrate now [y/n] (y)? ", end='')
-        response = raw_input().lower()
-        if response != '' and response != 'y':
-            return config
+        if config and warn:
+            logging.warn("legacy config loaded. Please run 'osc staging -p %s config --migrate'", self.project)
+
+        return config
+
+    def _migrate_staging_config(self, api):
+        config = api.attribute_value_load('Config')
+        if config:
+            logging.error("already migrated")
+            return
+
+        config = self._load_legacy_config(api, warn=False)
+        if not config:
+            logging.error("failed to load legacy config")
+            return
 
         api.attribute_value_save('Config', config)
 
     def apply_remote(self, api):
         """Fetch remote config and re-process (defaults, remote, .oscrc)."""
-
         config = api.attribute_value_load('Config')
         if not config:
-            # try the old way
-            config = self._migrate_staging_config(api)
+            config = self._load_legacy_config(api)
         if config:
             cp = ConfigParser()
             config = '[remote]\n' + config

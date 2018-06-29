@@ -140,6 +140,7 @@ def clean_args(args):
 @cmdln.option('--save', action='store_true', help='save the result to the dashboard container')
 @cmdln.option('--append', action='store_true', help='append to existing value')
 @cmdln.option('--clear', action='store_true', help='clear value')
+@cmdln.option('--migrate', action='store_true', help='migrate config')
 def do_staging(self, subcmd, opts, *args):
     """${cmd_name}: Commands to work with staging projects
 
@@ -330,7 +331,7 @@ def do_staging(self, subcmd, opts, *args):
         osc staging adi [--move] [--by-develproject] [--split] [REQUEST...]
         osc staging check [--old] [STAGING...]
         osc staging check_duplicate_binaries
-        osc staging config [--append] [--clear] [STAGING...] [key] [value]
+        osc staging config [--append] [--clear] [--migrate] [STAGING...] [key] [value]
         osc staging cleanup_rings
         osc staging freeze [--no-bootstrap] STAGING...
         osc staging frozenage [STAGING...]
@@ -439,6 +440,10 @@ def do_staging(self, subcmd, opts, *args):
         elif cmd == 'check_duplicate_binaries':
             CheckDuplicateBinariesCommand(api).perform(opts.save)
         elif cmd == 'config':
+            if opts.migrate:
+                config._migrate_staging_config(api)
+                return
+
             projects = set()
             key = value = None
             stagings = api.get_staging_projects_short(None) + \
