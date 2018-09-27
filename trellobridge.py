@@ -143,6 +143,12 @@ class TrelloBridge(ToolBase.ToolBase):
                         data = { 'desc': desc })
                 r.raise_for_status()
 
+        # better safe than sorry
+        if len(new - old) > 42:
+            logger.error("too many failures. not filing cards. Maybe the project is broken!?")
+            return
+
+        # add new cards
         for i in new - old:
             logger.debug("adding card '%s'", i)
             idLabels = set()
