@@ -28,6 +28,7 @@ import logging
 import sys
 import osc.core
 import urllib2
+from urllib import quote_plus
 
 logger = logging.getLogger()
 
@@ -98,7 +99,12 @@ class TrelloBridge(ToolBase.ToolBase):
             for t in results[i]:
                 repo, arch, status = t
                 if status != 'unresolvable':
-                    desc += "* [{}](https://build.opensuse.org/package/live_build_log/{}/{}/{})\n".format(status, p, repo, arch)
+                    buildlog = "https://build.opensuse.org/package/live_build_log/{}/{}/{}\n".format(p, repo, arch)
+                    product = quote_plus("openSUSE Distribution")
+                    bug_summary = quote_plus("{} {}".format(p, status))
+                    bug_comment = quote_plus("{} {} to build. Please see build log:\n{}".format(p, status, buildlog))
+                    bugurl="https://bugzilla.opensuse.org/enter_bug.cgi?product={}&short_desc={}&bug_file_loc={}&comment={}".format(product, bug_summary, quote_plus(buildlog), bug_comment)
+                    desc += "* [{}]({}): [file bug]({})\n".format(status, buildlog, bugurl)
 
             return desc
 
