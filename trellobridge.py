@@ -49,7 +49,7 @@ class TrelloBridge(ToolBase.ToolBase):
             key=self._apikey, token=self._token,
             fields="id,name,idOrganization",
             lists="open", list_fields="id,name",
-            cards="visible", cards_fields="id,desc,labels,idList",
+            cards="all", cards_fields="id,desc,labels,idList",
             labels="all", labels_fields="id,name"))
         return board.json()
 
@@ -58,6 +58,10 @@ class TrelloBridge(ToolBase.ToolBase):
         cards = {}
         board = self.get_board(boardid)
         for card in board['cards']:
+            if card['name'] in cards:
+                logger.warn("deleting duplicate card %s", card['name'])
+                r = requests.delete("https://trello.com/1/cards/{}".format(card['id']),
+                        params = dict(key=self._apikey, token=self._token))
             cards[card['name']] = card
 
         labels = {}
@@ -136,11 +140,23 @@ class TrelloBridge(ToolBase.ToolBase):
                         params = dict(key=self._apikey, token=self._token))
                 r.raise_for_status()
 
+            data = dict()
+
             desc = results2desc(i, results[i])
             if desc != card['desc']:
+                data['desc'] = desc
+
+            if card['closed']:
+                logger.debug("reopen %s", i)
+                data['closed'] = 'false'
+                # closed card, update due
+                data['due']=datetime.utcnow().isoformat(),
+                data['idList']=lists['Incoming']
+
+            if data:
                 r = requests.put("https://trello.com/1/cards/{}".format(card['id']),
                         params = dict(key=self._apikey, token=self._token),
-                        data = { 'desc': desc })
+                        data = data)
                 r.raise_for_status()
 
         # better safe than sorry
@@ -168,7 +184,10 @@ class TrelloBridge(ToolBase.ToolBase):
             r.raise_for_status()
 
         for i in old - new:
-            logger.debug("removing card '%s'", i)
+            card = cards[i]
+            if card['closed']:
+                continue
+            logger.debug("archiving card '%s'", i)
 #            r = requests.delete("https://trello.com/1/cards/{}".format(cards[i]['id']),
 #                    params = dict(key=self._apikey, token=self._token))
             r = requests.put("https://trello.com/1/cards/{}".format(card['id']),
@@ -179,16 +198,19 @@ class TrelloBridge(ToolBase.ToolBase):
 
         # trigger rebuild
         for card in board['cards']:
-            if card['idList'] != lists['Rebuild']:
+            if card['idList'] != lists['Rebuild'] or card['closed']:
                 continue
             prj, pkg = str(card['name']).split('/')
             if not prj in projects:
                 logger.error("invalid project %s for %s", prj, pkg)
                 continue
 
-            logger.debug("rebuild %s/%s", prj, pkg)
+            logger.debug("rebuild %s/%s %s", prj, pkg, card['closed'])
             try:
                 self.http_POST(self.makeurl(['build', prj], query=dict(code='failed', cmd='rebuild', package=pkg)))
+                r = requests.post("https://trello.com/1/cards/{}/actions/comments".format(card['id']),
+                        params = dict(key=self._apikey, token=self._token),
+                        data = { 'text': 'triggered rebuild' })
                 logger.debug("removing card '%s'", card['name'])
 #                r = requests.delete("https://trello.com/1/cards/{}".format(card['id']),
 #                        params = dict(key=self._apikey, token=self._token))
@@ -217,6 +239,11 @@ class CommandLineInterface(ToolBase.CommandLineInterface):
         if not self.options.key or not self.options.token:
             raise Exception("missing key and token options. generate them at https://trello.com/app-key")
         tool = TrelloBridge(self.options.key, self.options.token)
+
+        requests_log = logging.getLogger("urllib3")
+        requests_log.setLevel(logging.WARNING)
+        requests_log.propagate = False
+
         return tool
 
     def do_run(self, subcmd, opts, boardid):
@@ -248,9 +275,10 @@ class CommandLineInterface(ToolBase.CommandLineInterface):
         """
 
         board = self.tool.get_board(boardid)
+
         print("{}  {}".format(board['id'], board['name']))
         for l in board['cards']:
-            print("  {}  {} {}".format(l['id'], l['name'], ','.join(i['name'] for i in l['labels'])))
+            print("  {} {} {} {}".format(l['id'], l['closed'], l['name'], ','.join(i['name'] for i in l['labels'])))
 
     def do_labels(self, subcmd, opts, boardid):
         """${cmd_name}: list cards of a board
