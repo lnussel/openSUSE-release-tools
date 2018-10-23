@@ -38,6 +38,16 @@ class TrelloBridge(ToolBase.ToolBase):
         ToolBase.ToolBase.__init__(self)
         self._apikey = key
         self._token = token
+        self._fixtures = {
+                'lists': ('Incoming', 'Debugging', 'In Progress', 'Rebuild', 'Done'),
+                'labels': {
+                    'failed': 'red',
+                    'unresolvable': 'orange',
+                    'i586': None,
+                    'x86_64': None,
+                    'local': None,
+                    },
+                }
 
     def _get(self, path, **kwargs):
         r = requests.get("https://trello.com/1" + path, **kwargs)
@@ -52,6 +62,37 @@ class TrelloBridge(ToolBase.ToolBase):
             cards="all", cards_fields="id,desc,labels,idList",
             labels="all", labels_fields="id,name"))
         return board.json()
+
+    def populate(self, boardid):
+        board = self.get_board(boardid)
+
+        labels = {}
+        for l in board['labels']:
+            if len(l['name']):
+                labels[l['name']] = l['id']
+
+        lists = {}
+        for l in board['lists']:
+            if len(l['name']):
+                lists[l['name']] = l['id']
+
+
+        for l in self._fixtures['lists']:
+            if l in lists:
+                continue
+            logger.info("creating list %s", l)
+            r = requests.post("https://trello.com/1/boards/{}/lists".format(boardid),
+                    params = dict(key=self._apikey, token=self._token),
+                    data = { 'name': l, 'pos': 'bottom'})
+
+        for l in self._fixtures['labels'].keys():
+            if l in labels:
+                continue
+            logger.info("creating label %s", l)
+            r = requests.post("https://trello.com/1/boards/{}/labels".format(boardid),
+                    params = dict(key=self._apikey, token=self._token),
+                    data = { 'name': l, 'color': self._fixtures['labels'][l] })
+
 
     def results2trello(self, boardid, project):
 
@@ -76,8 +117,10 @@ class TrelloBridge(ToolBase.ToolBase):
 
         projects = [ project + suffix for suffix in (':Rings:0-Bootstrap', ':Rings:1-MinimalX', '')]
 
-        projects += [ project + ":Staging:" + p for p in ('A', 'B', 'C', 'D', 'E') ]
+        if project == "openSUSE:Leap:15.1":
+            projects += [ project + ":Staging:" + p for p in ('A', 'B', 'C', 'D', 'E') ]
 
+        notfinished = set()
         results = {}
         for prj in projects:
             root = ET.fromstring(self.cached_GET(self.makeurl(['build', prj, '_result'])))
@@ -94,6 +137,8 @@ class TrelloBridge(ToolBase.ToolBase):
                     if status in tocheck:
                         results.setdefault('/'.join((prj, package)), set()).add((repo, arch, status))
                         logger.debug("%s/%s %s %s %s", prj, package, repo, arch, status)
+                    else:
+                        notfinished.add(package)
 
         old = set(cards.keys())
         new = set(results.keys())
@@ -160,7 +205,7 @@ class TrelloBridge(ToolBase.ToolBase):
                 r.raise_for_status()
 
         # better safe than sorry
-        if len(new - old) > 42:
+        if len(new - old) > 120:
             logger.error("too many failures. not filing cards. Maybe the project is broken!?")
             return
 
@@ -183,7 +228,7 @@ class TrelloBridge(ToolBase.ToolBase):
                         ))
             r.raise_for_status()
 
-        for i in old - new:
+        for i in old - (new | notfinished):
             card = cards[i]
             if card['closed']:
                 continue
@@ -246,14 +291,14 @@ class CommandLineInterface(ToolBase.CommandLineInterface):
 
         return tool
 
-    def do_run(self, subcmd, opts, boardid):
+    def do_run(self, subcmd, opts, boardid, project):
         """${cmd_name}: print lists of a board
 
         ${cmd_usage}
         ${cmd_option_list}
         """
 
-        self.tool.results2trello(boardid, 'openSUSE:Leap:15.1')
+        self.tool.results2trello(boardid, project)
 
     def do_lists(self, subcmd, opts, boardid):
         """${cmd_name}: print lists of a board
@@ -290,7 +335,16 @@ class CommandLineInterface(ToolBase.CommandLineInterface):
         board = self.tool.get_board(boardid)
         print("{}  {}".format(board['id'], board['name']))
         for l in board['labels']:
-            print("  {}  {}".format(l['id'], l['name']))
+            print("  {}  {}".format(l['id'], l['color'], l['name']))
+
+    def do_populate(self, subcmd, opts, boardid):
+        """${cmd_name}: list cards of a board
+
+        ${cmd_usage}
+        ${cmd_option_list}
+        """
+
+        self.tool.populate(boardid)
 
 
 if __name__ == "__main__":
