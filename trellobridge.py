@@ -1,6 +1,6 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-# Copyright (c) 2017 SUSE LLC
+# Copyright (c) 2018,2019 SUSE LLC
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,8 @@ import sys
 import osc.core
 import urllib2
 from urllib import quote_plus
+import re
+
 
 logger = logging.getLogger()
 
@@ -46,6 +48,8 @@ class TrelloBridge(ToolBase.ToolBase):
                     'i586': None,
                     'x86_64': None,
                     'local': None,
+                    'rings': 'yellow',
+                    'staging': 'purple',
                     },
                 }
 
@@ -115,12 +119,13 @@ class TrelloBridge(ToolBase.ToolBase):
             if len(l['name']):
                 lists[l['name']] = l['id']
 
-        projects = [ project + suffix for suffix in (':Rings:0-Bootstrap', ':Rings:1-MinimalX', '')]
+        projects = [ project ]
+        # XXX figure out instead of hardcoding
+        projects += [ project + suffix for suffix in (':Rings:0-Bootstrap', ':Rings:1-MinimalX')]
 
         if project == "openSUSE:Leap:15.1":
             projects += [ project + ":Staging:" + p for p in ('A', 'B', 'C', 'D', 'E') ]
 
-        notfinished = set()
         results = {}
         for prj in projects:
             root = ET.fromstring(self.cached_GET(self.makeurl(['build', prj, '_result'])))
@@ -135,64 +140,67 @@ class TrelloBridge(ToolBase.ToolBase):
                     if 'published' in repostate:
                         tocheck += ['unresolvable']
                     if status in tocheck:
-                        results.setdefault('/'.join((prj, package)), set()).add((repo, arch, status))
+                        results.setdefault(package, set()).add((prj, repo, arch, status))
                         logger.debug("%s/%s %s %s %s", prj, package, repo, arch, status)
-                    else:
-                        notfinished.add(package)
 
         old = set(cards.keys())
         new = set(results.keys())
 
-        def results2desc(p, r):
-            desc = "https://build.opensuse.org/package/show/{}\n\n".format(p)
-            for t in results[i]:
-                repo, arch, status = t
+        def results2desc(pkg, r):
+            desc = ''
+            for t in r:
+                prj, repo, arch, status = t
+                desc = "[{0}/{1}](https://build.opensuse.org/package/show/{0}/{1})\n\n".format(prj, pkg)
                 if status != 'unresolvable':
-                    buildlog = "https://build.opensuse.org/package/live_build_log/{}/{}/{}\n".format(p, repo, arch)
+                    buildlog = "https://build.opensuse.org/package/live_build_log/{}/{}/{}/{}\n".format(prj, pkg, repo, arch)
                     product = quote_plus("openSUSE Distribution")
-                    bug_summary = quote_plus("{} {}".format(p, status))
-                    bug_comment = quote_plus("{} {} to build. Please see build log:\n{}".format(p, status, buildlog))
+                    bug_summary = quote_plus("{}/{} {}".format(prj, pkg, status))
+                    bug_comment = quote_plus("{}/{} {} to build. Please see build log:\n{}".format(prj, pkg, status, buildlog))
                     bugurl="https://bugzilla.opensuse.org/enter_bug.cgi?product={}&short_desc={}&bug_file_loc={}&comment={}".format(product, bug_summary, quote_plus(buildlog), bug_comment)
-                    desc += "* [{}]({}): [file bug]({})\n".format(status, buildlog, bugurl)
+                    desc += "* {}/{} [{}]({}): [file bug]({})\n".format(repo, arch, status, buildlog, bugurl)
 
             return desc
 
         # update existing cards
-        for i in old & new:
-            card = cards[i]
+        for pkg in old & new:
+            card = cards[pkg]
             oldlabels = set(str(l['name']) for l in card['labels'])
             newlabels = set()
 
-            for t in results[i]:
-                repo, arch, status = t
+            for t in results[pkg]:
+                prj, repo, arch, status = t
                 newlabels.add(arch)
                 newlabels.add(status)
+                if ':Rings:' in prj:
+                    newlabels.add('rings')
+                if ':Staging:' in prj:
+                    newlabels.add('staging')
 
             for l in newlabels - oldlabels:
                 if not l in labels:
                     logger.error('missing label %s', l)
                     continue
 
-                logger.debug("adding label '%s' to %s", l, i)
+                logger.debug("adding label '%s' to %s", l, pkg)
                 r = requests.post("https://trello.com/1/cards/{}/idLabels".format(card['id']),
                         params = dict(key=self._apikey, token=self._token),
                         data = { 'value': labels[l] })
                 r.raise_for_status()
 
             for l in oldlabels - newlabels:
-                logger.debug("removing label '%s' from %s", l, i)
+                logger.debug("removing label '%s' from %s", l, pkg)
                 r = requests.delete("https://trello.com/1/cards/{}/idLabels/{}".format(card['id'], labels[l]),
                         params = dict(key=self._apikey, token=self._token))
                 r.raise_for_status()
 
             data = dict()
 
-            desc = results2desc(i, results[i])
+            desc = results2desc(pkg, results[pkg])
             if desc != card['desc']:
                 data['desc'] = desc
 
             if card['closed']:
-                logger.debug("reopen %s", i)
+                logger.debug("reopen %s", pkg)
                 data['closed'] = 'false'
                 # closed card, update due
                 data['due']=datetime.utcnow().isoformat(),
@@ -210,29 +218,31 @@ class TrelloBridge(ToolBase.ToolBase):
             return
 
         # add new cards
-        for i in new - old:
-            logger.debug("adding card '%s'", i)
+        for pkg in new - old:
+            logger.debug("adding card '%s'", pkg)
             idLabels = set()
-            for t in results[i]:
-                repo, arch, status = t
+            for t in results[pkg]:
+                prj, repo, arch, status = t
                 idLabels.add(labels[arch])
                 idLabels.add(labels[status])
+
+            desc = results2desc(pkg, results[pkg])
             r = requests.post("https://trello.com/1/cards",
                     params = dict(key=self._apikey, token=self._token),
                     data = dict(
-                        name=i,
-                        desc="https://build.opensuse.org/package/show/{}".format(i),
+                        name=pkg,
+                        desc=desc,
                         idLabels=','.join(idLabels),
                         idList=lists['Incoming'],
                         due=datetime.utcnow().strftime('%Y-%m-%d'),
                         ))
             r.raise_for_status()
 
-        for i in old - (new | notfinished):
-            card = cards[i]
+        for pkg in old - new:
+            card = cards[pkg]
             if card['closed']:
                 continue
-            logger.debug("archiving card '%s'", i)
+            logger.debug("archiving card '%s'", pkg)
 #            r = requests.delete("https://trello.com/1/cards/{}".format(cards[i]['id']),
 #                    params = dict(key=self._apikey, token=self._token))
             r = requests.put("https://trello.com/1/cards/{}".format(card['id']),
@@ -245,7 +255,12 @@ class TrelloBridge(ToolBase.ToolBase):
         for card in board['cards']:
             if card['idList'] != lists['Rebuild'] or card['closed']:
                 continue
-            prj, pkg = str(card['name']).split('/')
+            m = re.search('package/show/([^/]*)/(.*)\)', card['desc'])
+            if not m:
+                logger.error("couldn't parse project from %s", card['desc'])
+                continue
+            prj = str(m.group(1))
+            pkg = str(m.group(2))
             if not prj in projects:
                 logger.error("invalid project %s for %s", prj, pkg)
                 continue
