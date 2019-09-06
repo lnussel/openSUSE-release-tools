@@ -124,7 +124,7 @@ class TrelloBridge(ToolBase.ToolBase):
         # XXX figure out instead of hardcoding
         projects += [ project + suffix for suffix in (':Rings:0-Bootstrap', ':Rings:1-MinimalX')]
 
-        if project == "openSUSE:Leap:15.1":
+        if project == "openSUSE:Leap:15.2":
             projects += [ project + ":Staging:" + p for p in ('A', 'B', 'C', 'D', 'E') ]
 
         results = {}
