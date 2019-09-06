@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 # Copyright (c) 2018,2019 SUSE LLC
 #
@@ -27,8 +27,9 @@ import requests
 import logging
 import sys
 import osc.core
-import urllib2
-from urllib import quote_plus
+from urllib.error import HTTPError
+import urllib.request, urllib.parse
+from urllib.parse import quote_plus
 import re
 
 
@@ -89,7 +90,7 @@ class TrelloBridge(ToolBase.ToolBase):
                     params = dict(key=self._apikey, token=self._token),
                     data = { 'name': l, 'pos': 'bottom'})
 
-        for l in self._fixtures['labels'].keys():
+        for l in list(self._fixtures['labels'].keys()):
             if l in labels:
                 continue
             logger.info("creating label %s", l)
@@ -279,7 +280,7 @@ class TrelloBridge(ToolBase.ToolBase):
                         data = { 'closed': 'true' })
 
                 r.raise_for_status()
-            except urllib2.HTTPError as e:
+            except HTTPError as e:
                 logger.error(e)
 
 class CommandLineInterface(ToolBase.CommandLineInterface):
@@ -323,9 +324,9 @@ class CommandLineInterface(ToolBase.CommandLineInterface):
         """
 
         board = self.tool.get_board(boardid)
-        print("{}  {}".format(board['id'], board['name']))
+        print(("{}  {}".format(board['id'], board['name'])))
         for l in board['lists']:
-            print("  {}  {}".format(l['id'], l['name']))
+            print(("  {}  {}".format(l['id'], l['name'])))
 
     def do_cards(self, subcmd, opts, boardid):
         """${cmd_name}: list cards of a board
@@ -336,9 +337,9 @@ class CommandLineInterface(ToolBase.CommandLineInterface):
 
         board = self.tool.get_board(boardid)
 
-        print("{}  {}".format(board['id'], board['name']))
+        print(("{}  {}".format(board['id'], board['name'])))
         for l in board['cards']:
-            print("  {} {} {} {}".format(l['id'], l['closed'], l['name'], ','.join(i['name'] for i in l['labels'])))
+            print(("  {} {} {} {}".format(l['id'], l['closed'], l['name'], ','.join(i['name'] for i in l['labels']))))
 
     def do_labels(self, subcmd, opts, boardid):
         """${cmd_name}: list cards of a board
@@ -348,9 +349,9 @@ class CommandLineInterface(ToolBase.CommandLineInterface):
         """
 
         board = self.tool.get_board(boardid)
-        print("{}  {}".format(board['id'], board['name']))
+        print(("{}  {}".format(board['id'], board['name'])))
         for l in board['labels']:
-            print("  {}  {}".format(l['id'], l['color'], l['name']))
+            print(("  {}  {}".format(l['id'], l['color'], l['name'])))
 
     def do_populate(self, subcmd, opts, boardid):
         """${cmd_name}: list cards of a board
